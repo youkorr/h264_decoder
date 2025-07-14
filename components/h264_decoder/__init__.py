@@ -94,9 +94,17 @@ async def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.std_string.operator("ref"), "error")], conf)
     
-    # Ajouter les dépendances pour esp_h264
-    cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_ENABLE=1")
-    cg.add_platformio_option("lib_deps", ["espressif/esp_h264@^1.0.0"])
+    # Configuration correcte pour ESP-IDF avec le composant esp_h264
+    cg.add_define("CONFIG_ESP_H264_DECODER_ENABLE", 1)
+    
+    # Ajouter le répertoire du composant comme extra_component
+    # Au lieu de lib_deps, on utilise la configuration ESP-IDF native
+    if CORE.using_esp_idf:
+        cg.add_idf_component(
+            name="esp_h264",
+            repo="https://github.com/espressif/esp-h264",
+            ref="main"
+        )
 
 # Action pour décoder une frame
 @automation.register_action(
@@ -114,7 +122,6 @@ async def decode_frame_action_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, parent)
     
-    # Correction : utiliser std::vector<uint8_t> comme dans le header
     template_ = await cg.templatable(config[CONF_H264_DATA], args, cg.std_vector.template(cg.uint8))
     cg.add(var.set_h264_data(template_))
     
@@ -123,3 +130,4 @@ async def decode_frame_action_to_code(config, action_id, template_arg, args):
         cg.add(var.set_data_size(template_))
     
     return var
+
