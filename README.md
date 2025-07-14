@@ -23,7 +23,8 @@ logger:
 
 # Composant externe H.264 decoder
 external_components:
-  - source: github://your-username/esphome-h264-decoder
+  - source: https://github.com/youkorr/h264_decoder
+    type: GIT
     components: [h264_decoder]
 
 # Configuration du décodeur H.264
