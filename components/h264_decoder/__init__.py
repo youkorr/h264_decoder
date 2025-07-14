@@ -21,14 +21,13 @@ DecodedFrame = h264_decoder_ns.struct("DecodedFrame")
 # Actions
 DecodeFrameAction = h264_decoder_ns.class_("DecodeFrameAction", automation.Action)
 
-# Triggers - CORRECTION ICI
+# Triggers
 FrameDecodedTrigger = h264_decoder_ns.class_("FrameDecodedTrigger", automation.Trigger.template(DecodedFrame.operator("ref")))
 DecodeErrorTrigger = h264_decoder_ns.class_("DecodeErrorTrigger", automation.Trigger.template(cg.std_string.operator("const").operator("ref")))
 
 # Enums
 PixelFormat = h264_decoder_ns.enum("PixelFormat")
 PIXEL_FORMATS = {
-    "YUV420P": PixelFormat.YUV420P,
     "RGB565": PixelFormat.RGB565,
     "RGB888": PixelFormat.RGB888,
 }
@@ -51,7 +50,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FRAME_BUFFER_SIZE): cv.positive_int,
             cv.Optional(CONF_MAX_FRAME_WIDTH, default=640): cv.positive_int,
             cv.Optional(CONF_MAX_FRAME_HEIGHT, default=480): cv.positive_int,
-            cv.Optional(CONF_PIXEL_FORMAT, default="YUV420P"): cv.enum(
+            cv.Optional(CONF_PIXEL_FORMAT, default="RGB565"): cv.enum(
                 PIXEL_FORMATS, upper=True
             ),
             cv.Optional(CONF_ON_FRAME_DECODED): automation.validate_automation(
@@ -85,7 +84,7 @@ async def to_code(config):
     
     cg.add(var.set_pixel_format(config[CONF_PIXEL_FORMAT]))
     
-    # Configuration des triggers - CORRECTION ICI
+    # Configuration des triggers
     for conf in config.get(CONF_ON_FRAME_DECODED, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(DecodedFrame.operator("ref"), "frame")], conf)
