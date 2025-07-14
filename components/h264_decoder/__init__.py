@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import esp32
+from esphome.const import CONF_ID, CONF_TRIGGER_ID  # Ajout de l'import manquant
 from esphome import automation
 
 DEPENDENCIES = ["esp32"]
