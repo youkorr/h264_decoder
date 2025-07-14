@@ -21,9 +21,9 @@ DecodedFrame = h264_decoder_ns.struct("DecodedFrame")
 # Actions
 DecodeFrameAction = h264_decoder_ns.class_("DecodeFrameAction", automation.Action)
 
-# Triggers
+# Triggers - CORRECTION ICI
 FrameDecodedTrigger = h264_decoder_ns.class_("FrameDecodedTrigger", automation.Trigger.template(DecodedFrame.operator("ref")))
-DecodeErrorTrigger = h264_decoder_ns.class_("DecodeErrorTrigger", automation.Trigger.template(cg.std_string.operator("ref")))
+DecodeErrorTrigger = h264_decoder_ns.class_("DecodeErrorTrigger", automation.Trigger.template(cg.std_string.operator("const").operator("ref")))
 
 # Enums
 PixelFormat = h264_decoder_ns.enum("PixelFormat")
@@ -85,18 +85,14 @@ async def to_code(config):
     
     cg.add(var.set_pixel_format(config[CONF_PIXEL_FORMAT]))
     
-    # Configuration des triggers
+    # Configuration des triggers - CORRECTION ICI
     for conf in config.get(CONF_ON_FRAME_DECODED, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(DecodedFrame.operator("ref"), "frame")], conf)
     
     for conf in config.get(CONF_ON_DECODE_ERROR, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.std_string.operator("ref"), "error")], conf)
-    
-    # Pour l'instant, pas de dépendances externes
-    # Le code utilisera le software decoder fallback
-    # TODO: Ajouter esp_h264 quand disponible
+        await automation.build_automation(trigger, [(cg.const_char_ptr, "error")], conf)
 
 # Action pour décoder une frame
 @automation.register_action(
@@ -122,5 +118,6 @@ async def decode_frame_action_to_code(config, action_id, template_arg, args):
         cg.add(var.set_data_size(template_))
     
     return var
+
 
 
