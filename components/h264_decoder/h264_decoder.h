@@ -64,7 +64,7 @@ class H264DecoderComponent : public Component {
   size_t frame_buffer_size_{0};
   uint32_t max_width_{640};
   uint32_t max_height_{480};
-  PixelFormat pixel_format_{PixelFormat::YUV420P};
+  PixelFormat pixel_format_{PixelFormat::RGB565}; // Changé de YUV420P à RGB565 par défaut
   bool decoder_initialized_{false};
   
 #ifdef HAS_ESP_H264_DECODER
@@ -159,7 +159,7 @@ class DecodeErrorTrigger : public Trigger<const char*> {
 
 }  // namespace h264_decoder
 
-// CORRECTION IMPORTANTE : Export des types dans le namespace esphome pour ESPHome
+// Export des types dans le namespace esphome pour ESPHome
 using h264_decoder::PixelFormat;
 using h264_decoder::DecodedFrame;
 using h264_decoder::H264DecoderComponent;
@@ -168,7 +168,6 @@ using h264_decoder::FrameDecodedTrigger;
 using h264_decoder::DecodeErrorTrigger;
 
 }  // namespace esphome
-
 
 
 
