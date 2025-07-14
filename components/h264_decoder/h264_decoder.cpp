@@ -1,5 +1,7 @@
 #include "h264_decoder.h"
 #include "esphome/core/log.h"
+#include "esp_timer.h"
+#include "esp_err.h"
 
 namespace esphome {
 namespace h264_decoder {
@@ -21,7 +23,7 @@ void H264DecoderComponent::setup() {
   // Initialiser le décodeur
   if (!initialize_decoder()) {
     ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-    mark_failed();
+    this->mark_failed();
     return;
   }
   
@@ -43,12 +45,16 @@ void H264DecoderComponent::dump_config() {
 }
 
 bool H264DecoderComponent::initialize_decoder() {
-  // Configuration du décodeur
+  // Configuration du décodeur pour ESP32-P4
+  memset(&decoder_config_, 0, sizeof(decoder_config_));
   decoder_config_.codec = ESP_VIDEO_CODEC_H264;
   decoder_config_.hw_accel = false;  // Décodage logiciel sur P4
   decoder_config_.output_type = ESP_VIDEO_DEC_OUTPUT_TYPE_YUV420;
   decoder_config_.max_width = max_width_;
   decoder_config_.max_height = max_height_;
+  
+  // Configuration de la mémoire
+  decoder_config_.flags = 0;
   
   // Créer le décodeur
   esp_err_t ret = esp_video_dec_create(&decoder_config_, &decoder_handle_);
@@ -57,6 +63,7 @@ bool H264DecoderComponent::initialize_decoder() {
     return false;
   }
   
+  ESP_LOGI(TAG, "H.264 decoder initialized successfully");
   return true;
 }
 
@@ -155,8 +162,7 @@ bool H264DecoderComponent::convert_pixel_format(const esp_video_dec_out_frame_t*
         temp_buffer_.resize(rgb_size);
       }
       
-      // Conversion YUV420 -> RGB (implémentation simplifiée)
-      // Dans un vrai projet, utilisez une bibliothèque optimisée comme libyuv
+      // Conversion YUV420 -> RGB
       if (!yuv420_to_rgb(src_frame->buffer, temp_buffer_.data(), 
                         dst_frame.width, dst_frame.height, pixel_format_)) {
         return false;
@@ -190,7 +196,7 @@ bool H264DecoderComponent::yuv420_to_rgb(const uint8_t* yuv_data, uint8_t* rgb_d
       uint8_t U = u_plane[(y/2) * (width/2) + (x/2)];
       uint8_t V = v_plane[(y/2) * (width/2) + (x/2)];
       
-      // Conversion YUV vers RGB
+      // Conversion YUV vers RGB (ITU-R BT.601)
       int32_t C = Y - 16;
       int32_t D = U - 128;
       int32_t E = V - 128;
@@ -207,8 +213,8 @@ bool H264DecoderComponent::yuv420_to_rgb(const uint8_t* yuv_data, uint8_t* rgb_d
       // Stocker selon le format
       if (format == PixelFormat::RGB565) {
         uint16_t rgb565 = ((R & 0xF8) << 8) | ((G & 0xFC) << 3) | (B >> 3);
-        rgb_data[(y * width + x) * 2] = rgb565 & 0xFF;
-        rgb_data[(y * width + x) * 2 + 1] = (rgb565 >> 8) & 0xFF;
+        uint16_t* rgb565_ptr = reinterpret_cast<uint16_t*>(rgb_data);
+        rgb565_ptr[y * width + x] = rgb565;
       } else if (format == PixelFormat::RGB888) {
         rgb_data[(y * width + x) * 3] = R;
         rgb_data[(y * width + x) * 3 + 1] = G;
@@ -241,3 +247,4 @@ void H264DecoderComponent::trigger_error_callbacks(const std::string& error) {
 
 }  // namespace h264_decoder
 }  // namespace esphome
+
