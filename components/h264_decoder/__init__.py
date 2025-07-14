@@ -94,17 +94,9 @@ async def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.std_string.operator("ref"), "error")], conf)
     
-    # Configuration correcte pour ESP-IDF avec le composant esp_h264
-    cg.add_define("CONFIG_ESP_H264_DECODER_ENABLE", 1)
-    
-    # Ajouter le répertoire du composant comme extra_component
-    # Au lieu de lib_deps, on utilise la configuration ESP-IDF native
-    if CORE.using_esp_idf:
-        cg.add_idf_component(
-            name="esp_h264",
-            repo="https://github.com/espressif/esp-h264",
-            ref="main"
-        )
+    # Pour l'instant, pas de dépendances externes
+    # Le code utilisera le software decoder fallback
+    # TODO: Ajouter esp_h264 quand disponible
 
 # Action pour décoder une frame
 @automation.register_action(
@@ -130,4 +122,5 @@ async def decode_frame_action_to_code(config, action_id, template_arg, args):
         cg.add(var.set_data_size(template_))
     
     return var
+
 
