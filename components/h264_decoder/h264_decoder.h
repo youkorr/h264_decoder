@@ -122,23 +122,37 @@ class H264DecoderComponent : public Component {
   bool is_keyframe(const uint8_t* nal_data, size_t nal_size);
 };
 
-// Actions pour l'automation
+// Actions pour l'automation (version simplifiée)
 template<typename... Ts>
 class DecodeFrameAction : public Action<Ts...> {
  public:
   DecodeFrameAction(H264DecoderComponent* parent) : parent_(parent) {}
   
-  TEMPLATABLE_VALUE(const uint8_t*, h264_data)
-  TEMPLATABLE_VALUE(size_t, data_size)
+  void set_h264_data(const std::vector<uint8_t>& data) { 
+    h264_data_ = data; 
+  }
+  
+  void set_h264_data(const std::string& data_str) {
+    h264_data_.assign(data_str.begin(), data_str.end());
+  }
+  
+  void set_data_size(size_t size) { 
+    data_size_ = size; 
+  }
   
   void play(Ts... x) override {
-    auto data = this->h264_data_.value(x...);
-    auto size = this->data_size_.value(x...);
-    this->parent_->decode_frame(data, size);
+    const uint8_t* data_ptr = h264_data_.empty() ? nullptr : h264_data_.data();
+    size_t actual_size = data_size_ > 0 ? data_size_ : h264_data_.size();
+    
+    if (data_ptr && actual_size > 0) {
+      this->parent_->decode_frame(data_ptr, actual_size);
+    }
   }
   
  protected:
   H264DecoderComponent* parent_;
+  std::vector<uint8_t> h264_data_;
+  size_t data_size_{0};
 };
 
 // Triggers pour l'automation
@@ -162,4 +176,5 @@ class DecodeErrorTrigger : public Trigger<const std::string&> {
 
 }  // namespace h264_decoder
 }  // namespace esphome
+
 
