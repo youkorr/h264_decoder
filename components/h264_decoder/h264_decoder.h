@@ -6,7 +6,7 @@
 #include <functional>
 #include <string>
 
-// Utilisation du composant esp_h264 d'Espressif
+// Utilisation du composant esp_h264 d'Espressif si disponible
 #if __has_include("esp_h264_decoder.h")
   #include "esp_h264_decoder.h"
   #define HAS_ESP_H264_DECODER
@@ -142,24 +142,34 @@ class DecodeFrameAction : public Action<Ts...> {
 // Triggers pour l'automation
 class FrameDecodedTrigger : public Trigger<DecodedFrame&> {
  public:
-  FrameDecodedTrigger(H264DecoderComponent* parent) {
+  explicit FrameDecodedTrigger(H264DecoderComponent* parent) {
     parent->add_on_frame_decoded_callback([this](DecodedFrame& frame) {
       this->trigger(frame);
     });
   }
 };
 
-class DecodeErrorTrigger : public Trigger<const std::string&> {
+class DecodeErrorTrigger : public Trigger<const char*> {
  public:
-  DecodeErrorTrigger(H264DecoderComponent* parent) {
+  explicit DecodeErrorTrigger(H264DecoderComponent* parent) {
     parent->add_on_decode_error_callback([this](const std::string& error) {
-      this->trigger(error);
+      this->trigger(error.c_str());
     });
   }
 };
 
 }  // namespace h264_decoder
+
+// CORRECTION IMPORTANTE : Export des types dans le namespace esphome pour ESPHome
+using h264_decoder::PixelFormat;
+using h264_decoder::DecodedFrame;
+using h264_decoder::H264DecoderComponent;
+using h264_decoder::DecodeFrameAction;
+using h264_decoder::FrameDecodedTrigger;
+using h264_decoder::DecodeErrorTrigger;
+
 }  // namespace esphome
+
 
 
 
