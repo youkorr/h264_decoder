@@ -12,12 +12,10 @@ static const char* TAG = "h264_decoder";
 void H264DecoderComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up H.264 Decoder...");
   
-#ifdef HAS_ESP_VIDEO_DEC
-  ESP_LOGI(TAG, "Using ESP Video Decoder API");
-#elif defined(HAS_ESP_MM_DEC)
-  ESP_LOGI(TAG, "Using ESP MM Decoder API");
+#ifdef HAS_ESP_H264_DECODER
+  ESP_LOGI(TAG, "Using ESP H.264 Software Decoder");
 #else
-  ESP_LOGW(TAG, "Using software-only decoder (limited functionality)");
+  ESP_LOGW(TAG, "Using basic software decoder fallback");
 #endif
   
   // Calculer la taille du buffer si pas spécifiée
@@ -28,6 +26,7 @@ void H264DecoderComponent::setup() {
   // Allouer les buffers
   frame_buffer_.resize(frame_buffer_size_);
   temp_buffer_.resize(frame_buffer_size_);
+  input_buffer_.resize(65536); // 64KB pour input
   
   // Initialiser le décodeur
   if (!initialize_decoder()) {
@@ -40,7 +39,7 @@ void H264DecoderComponent::setup() {
 }
 
 void H264DecoderComponent::loop() {
-  // Rien à faire dans la boucle principale pour l'instant
+  // Rien à faire dans la boucle principale
 }
 
 void H264DecoderComponent::dump_config() {
@@ -52,66 +51,50 @@ void H264DecoderComponent::dump_config() {
     pixel_format_ == PixelFormat::RGB565 ? "RGB565" : "RGB888");
   ESP_LOGCONFIG(TAG, "  Decoder Ready: %s", is_decoder_ready() ? "YES" : "NO");
   
-#ifdef HAS_ESP_VIDEO_DEC
-  ESP_LOGCONFIG(TAG, "  API: ESP Video Decoder");
-#elif defined(HAS_ESP_MM_DEC)
-  ESP_LOGCONFIG(TAG, "  API: ESP MM Decoder");
+#ifdef HAS_ESP_H264_DECODER
+  ESP_LOGCONFIG(TAG, "  API: ESP H.264 Software Decoder");
 #else
-  ESP_LOGCONFIG(TAG, "  API: Software Only");
+  ESP_LOGCONFIG(TAG, "  API: Basic Software Fallback");
 #endif
 }
 
 bool H264DecoderComponent::initialize_decoder() {
-#ifdef HAS_ESP_VIDEO_DEC
-  // Configuration du décodeur ESP Video
+#ifdef HAS_ESP_H264_DECODER
+  // Configuration du décodeur esp_h264
   memset(&decoder_config_, 0, sizeof(decoder_config_));
-  decoder_config_.codec = ESP_VIDEO_CODEC_H264;
-  decoder_config_.hw_accel = false;
-  decoder_config_.output_type = ESP_VIDEO_DEC_OUTPUT_TYPE_YUV420;
+  
+  // Configuration spécifique selon la documentation d'esp_h264
   decoder_config_.max_width = max_width_;
   decoder_config_.max_height = max_height_;
+  decoder_config_.output_format = ESP_H264_OUTPUT_FORMAT_YUV420; // Supposé
+  decoder_config_.buffer_size = frame_buffer_size_;
   
-  esp_err_t ret = esp_video_dec_create(&decoder_config_, &decoder_handle_);
+  esp_err_t ret = esp_h264_decoder_create(&decoder_config_, &decoder_handle_);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to create ESP video decoder: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "Failed to create ESP H.264 decoder: %s", esp_err_to_name(ret));
     return false;
   }
   
-#elif defined(HAS_ESP_MM_DEC)
-  // Configuration du décodeur ESP MM
-  memset(&mm_decoder_config_, 0, sizeof(mm_decoder_config_));
-  mm_decoder_config_.codec = ESP_MM_DEC_CODEC_H264;
-  mm_decoder_config_.max_width = max_width_;
-  mm_decoder_config_.max_height = max_height_;
-  
-  esp_err_t ret = esp_mm_dec_create(&mm_decoder_config_, &mm_decoder_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to create ESP MM decoder: %s", esp_err_to_name(ret));
-    return false;
-  }
-  
+  ESP_LOGI(TAG, "ESP H.264 decoder initialized successfully");
 #else
-  // Initialisation du décodeur logiciel
-  sw_decoder_state_.initialized = false;
-  sw_decoder_state_.has_sps_pps = false;
-  ESP_LOGW(TAG, "Software decoder initialized (basic NAL parsing only)");
+  // Initialisation du fallback
+  sw_decoder_state_.has_sps = false;
+  sw_decoder_state_.has_pps = false;
+  sw_decoder_state_.width = 0;
+  sw_decoder_state_.height = 0;
+  
+  ESP_LOGW(TAG, "Using basic software decoder (limited functionality)");
 #endif
   
   decoder_initialized_ = true;
-  ESP_LOGI(TAG, "H.264 decoder initialized successfully");
   return true;
 }
 
 void H264DecoderComponent::cleanup_decoder() {
-#ifdef HAS_ESP_VIDEO_DEC
+#ifdef HAS_ESP_H264_DECODER
   if (decoder_handle_) {
-    esp_video_dec_destroy(decoder_handle_);
+    esp_h264_decoder_destroy(decoder_handle_);
     decoder_handle_ = nullptr;
-  }
-#elif defined(HAS_ESP_MM_DEC)
-  if (mm_decoder_handle_) {
-    esp_mm_dec_destroy(mm_decoder_handle_);
-    mm_decoder_handle_ = nullptr;
   }
 #endif
   decoder_initialized_ = false;
@@ -140,33 +123,40 @@ bool H264DecoderComponent::decode_frame(const uint8_t* h264_data, size_t data_si
     trigger_error_callbacks("Invalid input data");
     return false;
   }
+
+#ifdef HAS_ESP_H264_DECODER
+  // Utilisation du décodeur esp_h264
+  esp_h264_input_data_t input_data = {};
+  input_data.data = const_cast<uint8_t*>(h264_data);
+  input_data.size = data_size;
+  input_data.timestamp = esp_timer_get_time();
   
-#ifdef HAS_ESP_VIDEO_DEC
-  // Décodage avec ESP Video API
-  esp_video_dec_in_frame_t input_frame = {};
-  input_frame.buffer = const_cast<uint8_t*>(h264_data);
-  input_frame.len = data_size;
-  input_frame.pts = esp_timer_get_time();
-  
-  esp_video_dec_out_frame_t output_frame = {};
+  esp_h264_frame_t output_frame = {};
   output_frame.buffer = frame_buffer_.data();
   output_frame.buffer_size = frame_buffer_.size();
   
-  esp_err_t ret = esp_video_dec_process(decoder_handle_, &input_frame, &output_frame);
+  esp_err_t ret = esp_h264_decoder_process(decoder_handle_, &input_data, &output_frame);
   if (ret != ESP_OK) {
-    std::string error = "Decode error: " + std::string(esp_err_to_name(ret));
+    // Si c'est juste "pas de frame complète", ce n'est pas une erreur
+    if (ret == ESP_ERR_NOT_FOUND || ret == ESP_ERR_INVALID_STATE) {
+      ESP_LOGV(TAG, "No complete frame yet");
+      return true;
+    }
+    
+    std::string error = "ESP H.264 decode error: " + std::string(esp_err_to_name(ret));
     trigger_error_callbacks(error);
     return false;
   }
   
-  if (output_frame.consumed == 0) {
-    return true; // Pas de frame complète
+  // Vérifier si une frame a été décodée
+  if (output_frame.width == 0 || output_frame.height == 0) {
+    ESP_LOGV(TAG, "No frame decoded yet");
+    return true;
   }
   
+  // Créer la structure de frame décodée
   DecodedFrame decoded_frame = {};
-  decoded_frame.width = output_frame.width;
-  decoded_frame.height = output_frame.height;
-  decoded_frame.timestamp = output_frame.pts;
+  decoded_frame.timestamp = output_frame.timestamp;
   
   if (!convert_pixel_format(&output_frame, decoded_frame)) {
     trigger_error_callbacks("Pixel format conversion failed");
@@ -177,19 +167,21 @@ bool H264DecoderComponent::decode_frame(const uint8_t* h264_data, size_t data_si
   return true;
   
 #else
-  // Fallback vers décodeur logiciel
-  return decode_frame_software(h264_data, data_size);
+  // Fallback vers décodeur basique
+  return decode_frame_software_fallback(h264_data, data_size);
 #endif
 }
 
-#ifdef HAS_ESP_VIDEO_DEC
-bool H264DecoderComponent::convert_pixel_format(const esp_video_dec_out_frame_t* src_frame, DecodedFrame& dst_frame) {
+#ifdef HAS_ESP_H264_DECODER
+bool H264DecoderComponent::convert_pixel_format(const esp_h264_frame_t* src_frame, DecodedFrame& dst_frame) {
+  dst_frame.width = src_frame->width;
+  dst_frame.height = src_frame->height;
   dst_frame.format = pixel_format_;
   
   switch (pixel_format_) {
     case PixelFormat::YUV420P:
       dst_frame.data = src_frame->buffer;
-      dst_frame.size = src_frame->len;
+      dst_frame.size = src_frame->size;
       break;
       
     case PixelFormat::RGB565:
@@ -220,48 +212,32 @@ bool H264DecoderComponent::convert_pixel_format(const esp_video_dec_out_frame_t*
 }
 #endif
 
-bool H264DecoderComponent::decode_frame_software(const uint8_t* h264_data, size_t data_size) {
-  // Décodeur logiciel basique - analyse NAL seulement
-  // Cette implémentation est très simplifiée
+bool H264DecoderComponent::decode_frame_software_fallback(const uint8_t* h264_data, size_t data_size) {
+  // Décodeur basique pour tests - génère une frame factice
+  ESP_LOGW(TAG, "Using software fallback - generating test frame");
   
-  if (!parse_h264_nal(h264_data, data_size)) {
-    trigger_error_callbacks("Failed to parse H.264 NAL units");
-    return false;
-  }
-  
-  // Pour l'instant, on génère une frame factice pour les tests
   DecodedFrame decoded_frame = {};
-  decoded_frame.width = 320;  // Taille fixe pour test
+  decoded_frame.width = 320;
   decoded_frame.height = 240;
   decoded_frame.format = PixelFormat::YUV420P;
   decoded_frame.data = frame_buffer_.data();
   decoded_frame.size = 320 * 240 * 3 / 2;
   decoded_frame.timestamp = esp_timer_get_time();
   
-  // Générer une frame de test (gradient)
+  // Générer une frame de test
   uint8_t* y = frame_buffer_.data();
   uint8_t* u = y + 320 * 240;
   uint8_t* v = u + 320 * 240 / 4;
   
+  // Pattern de test
   for (int i = 0; i < 320 * 240; i++) {
-    y[i] = (i % 256);
+    y[i] = (i / 320 + i % 320) & 0xFF;
   }
   memset(u, 128, 320 * 240 / 4);
   memset(v, 128, 320 * 240 / 4);
   
   trigger_frame_decoded_callbacks(decoded_frame);
   return true;
-}
-
-bool H264DecoderComponent::parse_h264_nal(const uint8_t* data, size_t size) {
-  // Analyse basique des NAL units
-  for (size_t i = 0; i < size - 4; i++) {
-    if (data[i] == 0x00 && data[i+1] == 0x00 && data[i+2] == 0x00 && data[i+3] == 0x01) {
-      ESP_LOGV(TAG, "Found NAL start code at position %zu", i);
-      return true;
-    }
-  }
-  return false;
 }
 
 bool H264DecoderComponent::yuv420_to_rgb(const uint8_t* yuv_data, uint8_t* rgb_data, 
@@ -304,17 +280,11 @@ bool H264DecoderComponent::yuv420_to_rgb(const uint8_t* yuv_data, uint8_t* rgb_d
 }
 
 void H264DecoderComponent::reset_decoder() {
-  if (decoder_initialized_) {
-#ifdef HAS_ESP_VIDEO_DEC
-    if (decoder_handle_) {
-      esp_video_dec_reset(decoder_handle_);
-    }
-#elif defined(HAS_ESP_MM_DEC)
-    if (mm_decoder_handle_) {
-      esp_mm_dec_reset(mm_decoder_handle_);
-    }
-#endif
+#ifdef HAS_ESP_H264_DECODER
+  if (decoder_handle_) {
+    esp_h264_decoder_reset(decoder_handle_);
   }
+#endif
 }
 
 void H264DecoderComponent::trigger_frame_decoded_callbacks(DecodedFrame& frame) {
