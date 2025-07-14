@@ -15,12 +15,15 @@ DEPENDENCIES = ["esp32"]
 h264_decoder_ns = cg.esphome_ns.namespace("h264_decoder")
 H264DecoderComponent = h264_decoder_ns.class_("H264DecoderComponent", cg.Component)
 
+# Struct DecodedFrame
+DecodedFrame = h264_decoder_ns.struct("DecodedFrame")
+
 # Actions
 DecodeFrameAction = h264_decoder_ns.class_("DecodeFrameAction", automation.Action)
 
 # Triggers
-FrameDecodedTrigger = h264_decoder_ns.class_("FrameDecodedTrigger", automation.Trigger)
-DecodeErrorTrigger = h264_decoder_ns.class_("DecodeErrorTrigger", automation.Trigger)
+FrameDecodedTrigger = h264_decoder_ns.class_("FrameDecodedTrigger", automation.Trigger.template(DecodedFrame.operator("ref")))
+DecodeErrorTrigger = h264_decoder_ns.class_("DecodeErrorTrigger", automation.Trigger.template(cg.std_string.operator("ref")))
 
 # Enums
 PixelFormat = h264_decoder_ns.enum("PixelFormat")
@@ -85,15 +88,15 @@ async def to_code(config):
     # Configuration des triggers
     for conf in config.get(CONF_ON_FRAME_DECODED, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.std_string, "frame")], conf)
+        await automation.build_automation(trigger, [(DecodedFrame.operator("ref"), "frame")], conf)
     
     for conf in config.get(CONF_ON_DECODE_ERROR, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.std_string, "error")], conf)
+        await automation.build_automation(trigger, [(cg.std_string.operator("ref"), "error")], conf)
     
-    # Ajouter les dépendances ESP-IDF
-    cg.add_build_flag("-DCONFIG_ESP_VIDEO_DECODER_ENABLE=1")
-    cg.add_library("esp_video_decoder", None)
+    # Ajouter les dépendances pour esp_h264
+    cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_ENABLE=1")
+    cg.add_platformio_option("lib_deps", ["espressif/esp_h264@^1.0.0"])
 
 # Action pour décoder une frame
 @automation.register_action(
@@ -103,7 +106,7 @@ async def to_code(config):
         {
             cv.GenerateID(): cv.use_id(H264DecoderComponent),
             cv.Required(CONF_H264_DATA): cv.templatable(cv.string),
-            cv.Required(CONF_DATA_SIZE): cv.templatable(cv.positive_int),
+            cv.Optional(CONF_DATA_SIZE): cv.templatable(cv.positive_int),
         }
     ),
 )
@@ -111,11 +114,12 @@ async def decode_frame_action_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, parent)
     
-    # CORRECTION : Remplacer cg.uint8_ptr par cg.std_vector.template(cg.uint8)
+    # Correction : utiliser std::vector<uint8_t> comme dans le header
     template_ = await cg.templatable(config[CONF_H264_DATA], args, cg.std_vector.template(cg.uint8))
     cg.add(var.set_h264_data(template_))
     
-    template_ = await cg.templatable(config[CONF_DATA_SIZE], args, cg.size_t)
-    cg.add(var.set_data_size(template_))
+    if CONF_DATA_SIZE in config:
+        template_ = await cg.templatable(config[CONF_DATA_SIZE], args, cg.size_t)
+        cg.add(var.set_data_size(template_))
     
     return var
