@@ -2,9 +2,18 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
-#include "esp_decoder.h"
+
+// Vérification de la disponibilité du décodeur vidéo pour ESP32-P4
+#ifdef CONFIG_ESP_VIDEO_ENABLE
 #include "esp_video_dec.h"
+#define HAS_H264_DECODER
+#else
+#error "Video decoder support not enabled. Please add CONFIG_ESP_VIDEO_ENABLE: 'y' to sdkconfig_options."
+#endif
+
 #include <vector>
+#include <functional>
+#include <string>
 
 namespace esphome {
 namespace h264_decoder {
@@ -75,6 +84,8 @@ class H264DecoderComponent : public Component {
   void cleanup_decoder();
   size_t calculate_frame_buffer_size();
   bool convert_pixel_format(const esp_video_dec_out_frame_t* src_frame, DecodedFrame& dst_frame);
+  bool yuv420_to_rgb(const uint8_t* yuv_data, uint8_t* rgb_data, 
+                     uint32_t width, uint32_t height, PixelFormat format);
   void trigger_frame_decoded_callbacks(DecodedFrame& frame);
   void trigger_error_callbacks(const std::string& error);
 };
