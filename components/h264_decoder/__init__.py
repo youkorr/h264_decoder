@@ -111,7 +111,8 @@ async def decode_frame_action_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, parent)
     
-    template_ = await cg.templatable(config[CONF_H264_DATA], args, cg.uint8_ptr)
+    # CORRECTION : Remplacer cg.uint8_ptr par cg.std_vector.template(cg.uint8)
+    template_ = await cg.templatable(config[CONF_H264_DATA], args, cg.std_vector.template(cg.uint8))
     cg.add(var.set_h264_data(template_))
     
     template_ = await cg.templatable(config[CONF_DATA_SIZE], args, cg.size_t)
