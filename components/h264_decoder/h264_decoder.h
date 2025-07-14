@@ -14,6 +14,10 @@
 namespace esphome {
 namespace h264_decoder {
 
+// Forward declarations
+class FrameDecodedTrigger;
+class DecodeErrorTrigger;
+
 enum class PixelFormat : uint8_t {
   RGB565 = 0,
   RGB888 = 1
@@ -37,7 +41,7 @@ class H264DecoderComponent : public Component {
   void set_frame_buffer_size(size_t size) { frame_buffer_size_ = size; }
   void set_max_frame_size(uint32_t width, uint32_t height) { 
     max_width_ = width;
-    max_height_ = height;
+    max_height_ = height; 
   }
   void set_pixel_format(PixelFormat format) { pixel_format_ = format; }
   
@@ -93,6 +97,24 @@ class H264DecoderComponent : public Component {
   
   void trigger_frame_decoded_callbacks(DecodedFrame& frame);
   void trigger_error_callbacks(const std::string& error);
+};
+
+class FrameDecodedTrigger : public Trigger<DecodedFrame&> {
+ public:
+  explicit FrameDecodedTrigger(H264DecoderComponent* parent) {
+    parent->add_on_frame_decoded_callback([this](DecodedFrame& frame) {
+      this->trigger(frame);
+    });
+  }
+};
+
+class DecodeErrorTrigger : public Trigger<const std::string&> {
+ public:
+  explicit DecodeErrorTrigger(H264DecoderComponent* parent) {
+    parent->add_on_decode_error_callback([this](const std::string& error) {
+      this->trigger(error);
+    });
+  }
 };
 
 }  // namespace h264_decoder
