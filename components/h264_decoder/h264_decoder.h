@@ -2,18 +2,24 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
-
-// Vérification de la disponibilité du décodeur vidéo pour ESP32-P4
-#ifdef CONFIG_ESP_VIDEO_ENABLE
-#include "esp_video_dec.h"
-#define HAS_H264_DECODER
-#else
-#error "Video decoder support not enabled. Please add CONFIG_ESP_VIDEO_ENABLE: 'y' to sdkconfig_options."
-#endif
-
 #include <vector>
 #include <functional>
 #include <string>
+
+// Détection des APIs vidéo disponibles
+#if defined(CONFIG_ESP_VIDEO_ENABLE) || defined(CONFIG_ESP32P4_ENABLE_VIDEO)
+  #if __has_include("esp_video_dec.h")
+    #include "esp_video_dec.h"
+    #define HAS_ESP_VIDEO_DEC
+  #elif __has_include("esp_mm_dec.h")
+    #include "esp_mm_dec.h"
+    #define HAS_ESP_MM_DEC
+  #else
+    #define HAS_SOFTWARE_DECODER_ONLY
+  #endif
+#else
+  #define HAS_SOFTWARE_DECODER_ONLY
+#endif
 
 namespace esphome {
 namespace h264_decoder {
@@ -57,7 +63,7 @@ class H264DecoderComponent : public Component {
   
   // Méthodes publiques
   bool decode_frame(const uint8_t* h264_data, size_t data_size);
-  bool is_decoder_ready() const { return decoder_handle_ != nullptr; }
+  bool is_decoder_ready() const { return decoder_initialized_; }
   void reset_decoder();
   
  protected:
@@ -66,14 +72,29 @@ class H264DecoderComponent : public Component {
   uint32_t max_width_{640};
   uint32_t max_height_{480};
   PixelFormat pixel_format_{PixelFormat::YUV420P};
+  bool decoder_initialized_{false};
   
-  // ESP-IDF decoder
+  // Handles pour les différentes APIs
+#ifdef HAS_ESP_VIDEO_DEC
   esp_video_dec_handle_t decoder_handle_{nullptr};
   esp_video_dec_cfg_t decoder_config_{};
+#elif defined(HAS_ESP_MM_DEC)
+  esp_mm_dec_handle_t mm_decoder_handle_{nullptr};
+  esp_mm_dec_cfg_t mm_decoder_config_{};
+#else
+  void* decoder_handle_{nullptr}; // Placeholder pour software decoder
+#endif
   
   // Buffers
   std::vector<uint8_t> frame_buffer_;
   std::vector<uint8_t> temp_buffer_;
+  
+  // Software decoder state (fallback)
+  struct SoftwareDecoderState {
+    bool initialized;
+    std::vector<uint8_t> sps_pps_buffer;
+    bool has_sps_pps;
+  } sw_decoder_state_{false, {}, false};
   
   // Callbacks
   std::vector<std::function<void(DecodedFrame&)>> on_frame_decoded_callbacks_;
@@ -83,11 +104,22 @@ class H264DecoderComponent : public Component {
   bool initialize_decoder();
   void cleanup_decoder();
   size_t calculate_frame_buffer_size();
+  
+#ifdef HAS_ESP_VIDEO_DEC
   bool convert_pixel_format(const esp_video_dec_out_frame_t* src_frame, DecodedFrame& dst_frame);
+#else
+  bool convert_pixel_format_software(const uint8_t* yuv_data, uint32_t width, uint32_t height, DecodedFrame& dst_frame);
+#endif
+  
   bool yuv420_to_rgb(const uint8_t* yuv_data, uint8_t* rgb_data, 
                      uint32_t width, uint32_t height, PixelFormat format);
   void trigger_frame_decoded_callbacks(DecodedFrame& frame);
   void trigger_error_callbacks(const std::string& error);
+  
+  // Software decoder methods (fallback)
+  bool decode_frame_software(const uint8_t* h264_data, size_t data_size);
+  bool parse_h264_nal(const uint8_t* data, size_t size);
+  bool is_keyframe(const uint8_t* nal_data, size_t nal_size);
 };
 
 // Actions pour l'automation
@@ -130,3 +162,4 @@ class DecodeErrorTrigger : public Trigger<const std::string&> {
 
 }  // namespace h264_decoder
 }  // namespace esphome
+
