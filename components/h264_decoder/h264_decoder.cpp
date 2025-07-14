@@ -47,7 +47,6 @@ void H264DecoderComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Max Frame Size: %dx%d", max_width_, max_height_);
   ESP_LOGCONFIG(TAG, "  Frame Buffer Size: %zu bytes", frame_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Pixel Format: %s", 
-    pixel_format_ == PixelFormat::YUV420P ? "YUV420P" :
     pixel_format_ == PixelFormat::RGB565 ? "RGB565" : "RGB888");
   ESP_LOGCONFIG(TAG, "  Decoder Ready: %s", is_decoder_ready() ? "YES" : "NO");
   
@@ -66,7 +65,7 @@ bool H264DecoderComponent::initialize_decoder() {
   // Configuration spécifique selon la documentation d'esp_h264
   decoder_config_.max_width = max_width_;
   decoder_config_.max_height = max_height_;
-  decoder_config_.output_format = ESP_H264_OUTPUT_FORMAT_YUV420; // Supposé
+  decoder_config_.output_format = ESP_H264_OUTPUT_FORMAT_RGB565; // Format par défaut
   decoder_config_.buffer_size = frame_buffer_size_;
   
   esp_err_t ret = esp_h264_decoder_create(&decoder_config_, &decoder_handle_);
@@ -102,8 +101,6 @@ void H264DecoderComponent::cleanup_decoder() {
 
 size_t H264DecoderComponent::calculate_frame_buffer_size() {
   switch (pixel_format_) {
-    case PixelFormat::YUV420P:
-      return max_width_ * max_height_ * 3 / 2;
     case PixelFormat::RGB565:
       return max_width_ * max_height_ * 2;
     case PixelFormat::RGB888:
@@ -178,35 +175,21 @@ bool H264DecoderComponent::convert_pixel_format(const esp_h264_frame_t* src_fram
   dst_frame.height = src_frame->height;
   dst_frame.format = pixel_format_;
   
-  switch (pixel_format_) {
-    case PixelFormat::YUV420P:
-      dst_frame.data = src_frame->buffer;
-      dst_frame.size = src_frame->size;
-      break;
-      
-    case PixelFormat::RGB565:
-    case PixelFormat::RGB888: {
-      size_t rgb_size = (pixel_format_ == PixelFormat::RGB565) ? 
-        dst_frame.width * dst_frame.height * 2 : 
-        dst_frame.width * dst_frame.height * 3;
-      
-      if (rgb_size > temp_buffer_.size()) {
-        temp_buffer_.resize(rgb_size);
-      }
-      
-      if (!yuv420_to_rgb(src_frame->buffer, temp_buffer_.data(), 
-                        dst_frame.width, dst_frame.height, pixel_format_)) {
-        return false;
-      }
-      
-      dst_frame.data = temp_buffer_.data();
-      dst_frame.size = rgb_size;
-      break;
-    }
-    
-    default:
-      return false;
+  size_t rgb_size = (pixel_format_ == PixelFormat::RGB565) ? 
+    dst_frame.width * dst_frame.height * 2 : 
+    dst_frame.width * dst_frame.height * 3;
+  
+  if (rgb_size > temp_buffer_.size()) {
+    temp_buffer_.resize(rgb_size);
   }
+  
+  if (!yuv420_to_rgb(src_frame->buffer, temp_buffer_.data(), 
+                    dst_frame.width, dst_frame.height, pixel_format_)) {
+    return false;
+  }
+  
+  dst_frame.data = temp_buffer_.data();
+  dst_frame.size = rgb_size;
   
   return true;
 }
@@ -219,22 +202,19 @@ bool H264DecoderComponent::decode_frame_software_fallback(const uint8_t* h264_da
   DecodedFrame decoded_frame = {};
   decoded_frame.width = 320;
   decoded_frame.height = 240;
-  decoded_frame.format = PixelFormat::YUV420P;
+  decoded_frame.format = PixelFormat::RGB565; // Format par défaut
   decoded_frame.data = frame_buffer_.data();
-  decoded_frame.size = 320 * 240 * 3 / 2;
+  decoded_frame.size = 320 * 240 * 2;
   decoded_frame.timestamp = esp_timer_get_time();
   
-  // Générer une frame de test
-  uint8_t* y = frame_buffer_.data();
-  uint8_t* u = y + 320 * 240;
-  uint8_t* v = u + 320 * 240 / 4;
-  
-  // Pattern de test
-  for (int i = 0; i < 320 * 240; i++) {
-    y[i] = (i / 320 + i % 320) & 0xFF;
+  // Générer une frame de test (damier en RGB565)
+  uint16_t* frame_data = reinterpret_cast<uint16_t*>(frame_buffer_.data());
+  for (int y = 0; y < 240; y++) {
+    for (int x = 0; x < 320; x++) {
+      bool checker = ((x / 16) + (y / 16)) % 2 == 0;
+      frame_data[y * 320 + x] = checker ? 0xF800 : 0x07E0; // Rouge ou vert
+    }
   }
-  memset(u, 128, 320 * 240 / 4);
-  memset(v, 128, 320 * 240 / 4);
   
   trigger_frame_decoded_callbacks(decoded_frame);
   return true;
@@ -268,7 +248,7 @@ bool H264DecoderComponent::yuv420_to_rgb(const uint8_t* yuv_data, uint8_t* rgb_d
         uint16_t rgb565 = ((R & 0xF8) << 8) | ((G & 0xFC) << 3) | (B >> 3);
         uint16_t* rgb565_ptr = reinterpret_cast<uint16_t*>(rgb_data);
         rgb565_ptr[y * width + x] = rgb565;
-      } else if (format == PixelFormat::RGB888) {
+      } else {
         rgb_data[(y * width + x) * 3] = R;
         rgb_data[(y * width + x) * 3 + 1] = G;
         rgb_data[(y * width + x) * 3 + 2] = B;
