@@ -19,7 +19,6 @@ namespace esphome {
 namespace h264_decoder {
 
 enum class PixelFormat {
-  YUV420P,
   RGB565, 
   RGB888
 };
